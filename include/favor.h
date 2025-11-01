@@ -103,34 +103,71 @@ namespace favor
             }
         };
 
+        enum class ConditionOp
+        {
+            IN,
+            EQ,
+            NE,
+            GT,
+            LT,
+            GE,
+            LE
+        };
+
+        ConditionOp getConditionOp(const std::string &opStr) const
+        {
+            if (opStr == "IN")
+                return ConditionOp::IN;
+            if (opStr == "==")
+                return ConditionOp::EQ;
+            if (opStr == "!=")
+                return ConditionOp::NE;
+            if (opStr == ">")
+                return ConditionOp::GT;
+            if (opStr == "<")
+                return ConditionOp::LT;
+            if (opStr == ">=")
+                return ConditionOp::GE;
+            if (opStr == "<=")
+                return ConditionOp::LE;
+            return ConditionOp::EQ;
+        }
+
         bool checkCondition(attributetype *attribute, const FilterConditionWithId &condition) const
         {
             attributetype value = attribute[condition.attribute_id];
 
-            if (condition.op == "IN")
+            ConditionOp op = getConditionOp(condition.op);
+
+            if (op == ConditionOp::IN)
             {
                 return condition.attribute_value.find(value) != condition.attribute_value.end();
             }
             else if (condition.attribute_value.size() == 1)
             {
                 attributetype ref_value = *condition.attribute_value.begin();
-                if (condition.op == "==")
+                switch (op)
+                {
+                case ConditionOp::EQ:
                     return value == ref_value;
-                if (condition.op == "!=")
+                case ConditionOp::NE:
                     return value != ref_value;
-                if (condition.op == ">")
+                case ConditionOp::GT:
                     return value > ref_value;
-                if (condition.op == "<")
+                case ConditionOp::LT:
                     return value < ref_value;
-                if (condition.op == ">=")
+                case ConditionOp::GE:
                     return value >= ref_value;
-                if (condition.op == "<=")
+                case ConditionOp::LE:
                     return value <= ref_value;
+                default:
+                    return true;
+                }
             }
             return true;
         }
 
-        bool checkConditions(attributetype *attribute, std::vector<FilterConditionWithId> filtering_conditions) const
+        bool checkConditions(attributetype *attribute, const std::vector<FilterConditionWithId> &filtering_conditions) const
         {
             for (const auto &cond : filtering_conditions)
             {
@@ -144,8 +181,7 @@ namespace favor
 
         dist_t distFilter(float p) const // selectivity
         {
-            // return (1 - p) * (this->ef_ - p) * delta_d / (40 * p);
-            return 2200;
+            return (1 - p) * (this->ef_ - p) * delta_d / (2 * p);
         }
 
         bool stopSearch(dist_t candidate_dist, dist_t lowerBound, int num) const
@@ -872,7 +908,7 @@ namespace favor
                         }
 
                         dist_t diff = elements[0].first - elements[elements.size() - 10].first;
-                        local_delta_d += diff / (rate * this->max_elements_);
+                        local_delta_d += 5 * diff / (rate * this->max_elements_);
                     }
                     currObj = this->mutuallyConnectNewElement(data_point, cur_c, top_candidates, level);
                 }
@@ -941,7 +977,7 @@ namespace favor
             }
 
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> top_candidates;
-            top_candidates = searchBaseLayerSTFilter(currObj, query_data, std::max(this->ef_, k), e_distance, filtering_conditions);
+            top_candidates = searchBaseLayerSTFilter(currObj, query_data, std::max(this->ef_, k), e_distance / this->ef_, filtering_conditions);
             while (top_candidates.size() > 0)
             {
                 std::pair<dist_t, tableint> rez = top_candidates.top();
@@ -967,7 +1003,7 @@ namespace favor
         searchBruteForce(const void *query_data, size_t k, std::vector<FilterConditionWithId> filtering_conditions) const
         {
             std::priority_queue<std::pair<dist_t, labeltype>> result;
-            for (int i = 0; i < this->max_elements_; i++)
+            for (size_t i = 0; i < this->max_elements_; i++)
             {
                 if (checkConditions(getAttributeByInternalId(i), filtering_conditions))
                 {
@@ -988,11 +1024,11 @@ namespace favor
         {
             float p;
             size_t count = 0;
-            size_t sample_size = std::max(this->max_elements_/10000, static_cast<size_t>(1));
-            for(size_t i = 0; i< this->max_elements_; i+=10000)
+            size_t sample_size = std::max(this->max_elements_ / 10000, static_cast<size_t>(1));
+            for (size_t i = 0; i < this->max_elements_; i += 10000)
             {
                 if (checkConditions(getAttributeByInternalId(i), filtering_conditions))
-                count++;
+                    count++;
             }
             p = (float)count / sample_size;
             return p;
