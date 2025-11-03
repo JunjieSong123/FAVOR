@@ -3,6 +3,7 @@
 #include "hnswlib/hnswlib.h"
 #include "hnswlib/hnswalg.h"
 #include "filter_condition.h"
+#include "check.h"
 
 using namespace hnswlib;
 namespace favor
@@ -102,82 +103,6 @@ namespace favor
                 return a.first < b.first;
             }
         };
-
-        enum class ConditionOp
-        {
-            IN,
-            EQ,
-            NE,
-            GT,
-            LT,
-            GE,
-            LE
-        };
-
-        ConditionOp getConditionOp(const std::string &opStr) const
-        {
-            if (opStr == "IN")
-                return ConditionOp::IN;
-            if (opStr == "==")
-                return ConditionOp::EQ;
-            if (opStr == "!=")
-                return ConditionOp::NE;
-            if (opStr == ">")
-                return ConditionOp::GT;
-            if (opStr == "<")
-                return ConditionOp::LT;
-            if (opStr == ">=")
-                return ConditionOp::GE;
-            if (opStr == "<=")
-                return ConditionOp::LE;
-            return ConditionOp::EQ;
-        }
-
-        bool checkCondition(attributetype *attribute, const FilterConditionWithId &condition) const
-        {
-            attributetype value = attribute[condition.attribute_id];
-
-            ConditionOp op = getConditionOp(condition.op);
-
-            if (op == ConditionOp::IN)
-            {
-                return condition.attribute_value.find(value) != condition.attribute_value.end();
-            }
-            else if (condition.attribute_value.size() == 1)
-            {
-                attributetype ref_value = *condition.attribute_value.begin();
-                switch (op)
-                {
-                case ConditionOp::EQ:
-                    return value == ref_value;
-                case ConditionOp::NE:
-                    return value != ref_value;
-                case ConditionOp::GT:
-                    return value > ref_value;
-                case ConditionOp::LT:
-                    return value < ref_value;
-                case ConditionOp::GE:
-                    return value >= ref_value;
-                case ConditionOp::LE:
-                    return value <= ref_value;
-                default:
-                    return true;
-                }
-            }
-            return true;
-        }
-
-        bool checkConditions(attributetype *attribute, const std::vector<FilterConditionWithId> &filtering_conditions) const
-        {
-            for (const auto &cond : filtering_conditions)
-            {
-                if (!checkCondition(attribute, cond))
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
 
         dist_t distFilter(float p) const // selectivity
         {
@@ -624,7 +549,7 @@ namespace favor
                                 const void *data_point,
                                 size_t ef,
                                 dist_t e_distance,
-                                std::vector<FilterConditionWithId> filtering_conditions) const
+                                OptimizedFilter conditions) const
         {
             VisitedList *vl = this->visited_list_pool_->getFreeVisitedList();
             vl_type *visited_array = vl->mass;
@@ -638,7 +563,7 @@ namespace favor
             char *ep_data = this->getDataByInternalId(ep_id);
             // calculate the distance between entry and query.
             dist_t dist;
-            if (checkConditions(getAttributeByInternalId(ep_id), filtering_conditions))
+            if (conditions.check(getAttributeByInternalId(ep_id)))
                 dist = this->fstdistfunc_(data_point, ep_data, this->dist_func_param_);
             else
                 dist = this->fstdistfunc_(data_point, ep_data, this->dist_func_param_) + e_distance;
@@ -695,7 +620,7 @@ namespace favor
 
                         char *currObj1 = (this->getDataByInternalId(candidate_id));
                         dist_t dist1;
-                        if (checkConditions(getAttributeByInternalId(candidate_id), filtering_conditions))
+                        if (conditions.check(getAttributeByInternalId(candidate_id)))
                             dist1 = this->fstdistfunc_(data_point, currObj1, this->dist_func_param_);
                         else
                             dist1 = this->fstdistfunc_(data_point, currObj1, this->dist_func_param_) + e_distance;
@@ -705,15 +630,13 @@ namespace favor
                         if (flag_consider_candidate)
                         {
                             candidate_set.emplace(-dist1, candidate_id);
-                            if (checkConditions(getAttributeByInternalId(candidate_id), filtering_conditions))
+                            if (conditions.check(getAttributeByInternalId(candidate_id)))
                                 num_in_range++;
 #ifdef USE_SSE
                             _mm_prefetch(data_level0_memory_ + candidate_set.top().second * size_data_per_element_ +
                                              offsetLevel0_, ///////////
                                          _MM_HINT_T0);      ////////////////////////
 #endif
-
-                            // if (checkConditions(getAttributeByInternalId(candidate_id), filtering_conditions))
                             top_candidates.emplace(dist1, candidate_id);
 
                             bool flag_remove_extra = false;
@@ -724,7 +647,7 @@ namespace favor
                             {
                                 top_candidates.pop();
                                 flag_remove_extra = top_candidates.size() > ef;
-                                if (checkConditions(getAttributeByInternalId(candidate_id), filtering_conditions))
+                                if (conditions.check(getAttributeByInternalId(candidate_id)))
                                     num_in_range--;
                             }
 
@@ -933,7 +856,7 @@ namespace favor
         }
 
         std::priority_queue<std::pair<dist_t, labeltype>>
-        searchGraph(const void *query_data, size_t k, float p, std::vector<FilterConditionWithId> filtering_conditions) const
+        searchGraph(const void *query_data, size_t k, float p, OptimizedFilter conditions) const
         {
             std::priority_queue<std::pair<dist_t, labeltype>> result;
             if (this->cur_element_count == 0)
@@ -977,12 +900,12 @@ namespace favor
             }
 
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> top_candidates;
-            top_candidates = searchBaseLayerSTFilter(currObj, query_data, std::max(this->ef_, k), e_distance / this->ef_, filtering_conditions);
+            top_candidates = searchBaseLayerSTFilter(currObj, query_data, std::max(this->ef_, k), e_distance / this->ef_, conditions);
             while (top_candidates.size() > 0)
             {
                 std::pair<dist_t, tableint> rez = top_candidates.top();
                 attributetype *attribute = getAttributeByInternalId(rez.second);
-                if (checkConditions(attribute, filtering_conditions))
+                if (conditions.check(attribute))
                 {
                     result.push(std::pair<dist_t, labeltype>(rez.first, this->getExternalLabel(rez.second)));
                 }
@@ -1000,34 +923,36 @@ namespace favor
         }
 
         std::priority_queue<std::pair<dist_t, labeltype>>
-        searchBruteForce(const void *query_data, size_t k, std::vector<FilterConditionWithId> filtering_conditions) const
+        searchBruteForce(const void *query_data, size_t k, OptimizedFilter conditions) const
         {
             std::priority_queue<std::pair<dist_t, labeltype>> result;
             for (size_t i = 0; i < this->max_elements_; i++)
             {
-                if (checkConditions(getAttributeByInternalId(i), filtering_conditions))
+                if (conditions.check(getAttributeByInternalId(i)))
                 {
                     dist_t d = this->fstdistfunc_(query_data, this->getDataByInternalId(i), this->dist_func_param_);
-                    result.push(std::pair<dist_t, labeltype>(d, this->getExternalLabel(i)));
+                    if (result.size() < k)
+                        result.push(std::pair<dist_t, labeltype>(d, this->getExternalLabel(i)));
+                    else if (d < result.top().first)
+                    {
+                        result.push(std::pair<dist_t, labeltype>(d, this->getExternalLabel(i)));
+                        result.pop();
+                    }
                 }
             }
             while (result.size() < k)
                 result.push(std::pair<dist_t, labeltype>(1000000, -1));
-            while (result.size() > k)
-            {
-                result.pop();
-            }
             return result;
         }
 
-        float selectivityEstimator(std::vector<FilterConditionWithId> filtering_conditions) const
+        float selectivityEstimator(OptimizedFilter conditions) const
         {
             float p;
             size_t count = 0;
             size_t sample_size = std::max(this->max_elements_ / 10000, static_cast<size_t>(1));
             for (size_t i = 0; i < this->max_elements_; i += 10000)
             {
-                if (checkConditions(getAttributeByInternalId(i), filtering_conditions))
+                if (conditions.check(getAttributeByInternalId(i)))
                     count++;
             }
             p = (float)count / sample_size;
@@ -1037,11 +962,12 @@ namespace favor
         std::priority_queue<std::pair<dist_t, labeltype>>
         searchKnn(const void *query_data, size_t k, std::vector<FilterConditionWithId> filtering_conditions) const
         {
-            float p = selectivityEstimator(filtering_conditions);
+            OptimizedFilter conditions(filtering_conditions);
+            float p = selectivityEstimator(conditions);
             if (p > 0.01)
-                return searchGraph(query_data, k, p, filtering_conditions);
+                return searchGraph(query_data, k, p, conditions);
             else
-                return searchBruteForce(query_data, k, filtering_conditions);
+                return searchBruteForce(query_data, k, conditions);
         }
 
         ~FAVOR()
