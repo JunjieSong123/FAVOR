@@ -109,12 +109,9 @@ namespace favor
             return (1 - p) * (this->ef_ - p) * delta_d / (2 * p);
         }
 
-        bool stopSearch(dist_t candidate_dist, dist_t lowerBound, int num) const
+        bool stopSearch(dist_t candidate_dist, dist_t lowerBound, size_t num, size_t ef) const
         {
-            bool flag_stop_search = candidate_dist > lowerBound;
-            // bool flag_num = static_cast<size_t>(num) > this->ef_ / 2;
-            // return flag_stop_search && flag_num;
-            return flag_stop_search;
+            return candidate_dist > lowerBound;
         }
 
         inline void setAttribute(tableint internal_id, attributetype *attribute) const
@@ -573,7 +570,7 @@ namespace favor
 
             visited_array[ep_id] = visited_array_tag;
 
-            int num_in_range = 0;
+            size_t num_in_range = 0;
             // int length = 0;
 
             while (!candidate_set.empty())
@@ -583,8 +580,9 @@ namespace favor
                 dist_t candidate_dist = -current_node_pair.first;
 
                 // if part of vectors in candidate are in range, stop searching
-                if (stopSearch(candidate_dist, lowerBound, num_in_range))
+                if (stopSearch(candidate_dist, lowerBound, num_in_range, ef))
                 {
+                    // std::cout << num_in_range << " ";
                     break;
                 }
 
@@ -645,9 +643,10 @@ namespace favor
 
                             while (flag_remove_extra)
                             {
+                                auto evicted = top_candidates.top();
                                 top_candidates.pop();
                                 flag_remove_extra = top_candidates.size() > ef;
-                                if (conditions.check(getAttributeByInternalId(candidate_id)))
+                                if (conditions.check(getAttributeByInternalId(evicted.second)))
                                     num_in_range--;
                             }
 
