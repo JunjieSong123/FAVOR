@@ -12,6 +12,12 @@ target_compile_options(generate_attribute PRIVATE -Wall ${OpenMP_CXX_FLAGS})
 target_link_libraries(generate_attribute ${OpenMP_CXX_FLAGS})
 target_link_libraries(generate_attribute OpenMP::OpenMP_CXX)
 
+add_executable(distance_calculation distance_calculation.cpp)
+target_link_libraries(distance_calculation UTIL)
+target_compile_options(distance_calculation PRIVATE -Wall ${OpenMP_CXX_FLAGS})
+target_link_libraries(distance_calculation ${OpenMP_CXX_FLAGS})
+target_link_libraries(distance_calculation OpenMP::OpenMP_CXX)
+
 add_executable(build_index build_index.cpp)
 target_link_libraries(build_index UTIL)
 target_compile_options(build_index PRIVATE -Wall ${OpenMP_CXX_FLAGS})

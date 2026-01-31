@@ -75,9 +75,9 @@ int main(int argc, char *argv[])
 
     // float temp_distance_x[20][1000];
 
-    omp_set_num_threads(32);
+    // omp_set_num_threads(dynamic);
 
-#pragma omp parallel for
+#pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < queryset.num; i++)
     {
         std::vector<std::pair<int, float>> gt_dist;

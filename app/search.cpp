@@ -117,6 +117,7 @@ int main(int argc, char *argv[])
     float correct = 0;
 
     for (int i = 0; i < queryset.num; i++)
+    // for (int i = 0; i < 100; i++)
     {
             std::priority_queue<std::pair<float, hnswlib::labeltype>> result = alg_hnsw->searchKnn(queryset.vectors.at(i).data(), k, conditions_with_id);
             for (int j = 0; j < k; j++)

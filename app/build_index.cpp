@@ -77,8 +77,6 @@ int main(int argc, char* argv[]) {
         alg_hnsw->addPoint(baseset.vectors.at(i).data(), baseset.vector_id[i], baseset.attribute + i * baseset.attribute_num);
     });
     std::cout << "finish building graph" << std::endl;
-    float delta_d = alg_hnsw->delta_d;
-    std::cout << "delta d = " << delta_d << std::endl;
 
     alg_hnsw->saveIndex(index_path);
 
