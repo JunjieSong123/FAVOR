@@ -1,12 +1,18 @@
+#pragma once
+
 #include <functional>
 #include <vector>
 #include <set>
 #include <string>
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+
+#include "filter_condition.h"
 
 typedef float attributetype;
 
-enum class ConditionOp
+enum class ConditionOp : uint8_t
 {
     IN,
     EQ,
@@ -17,66 +23,67 @@ enum class ConditionOp
     LE
 };
 
-struct ConditionWrapper {
-    int attribute_id;
+struct alignas(16) FastCondition {
+    uint32_t attribute_id;
     ConditionOp op;
     attributetype ref_value;
-    std::vector<attributetype> in_values;
+    uint32_t in_values_count;
+    const attributetype* in_values_ptr;
 
-    explicit ConditionWrapper(const FilterConditionWithId& cond) {
-        attribute_id = cond.attribute_id;
+    FastCondition() = default;
+
+    explicit FastCondition(const FilterConditionWithId& cond, std::vector<attributetype>& in_vals_storage, size_t& storage_offset) {
+        attribute_id = static_cast<uint32_t>(cond.attribute_id);
         op = getConditionOp(cond.op);
-        
+
         if (op == ConditionOp::IN) {
-            in_values.reserve(cond.attribute_value.size());
-            for (const auto& val : cond.attribute_value) {
-                in_values.push_back(val);
-            }
-        } else {
-            if (!cond.attribute_value.empty()) {
-                ref_value = *cond.attribute_value.begin();
+            in_values_count = static_cast<uint32_t>(cond.attribute_value.size());
+            if (in_values_count > 0) {
+                in_values_ptr = &in_vals_storage[storage_offset];
+                for (const auto& val : cond.attribute_value) {
+                    in_vals_storage[storage_offset++] = val;
+                }
             } else {
-                ref_value = 0;
+                in_values_ptr = nullptr;
             }
+            ref_value = 0;
+        } else {
+            in_values_count = 0;
+            in_values_ptr = nullptr;
+            ref_value = cond.attribute_value.empty() ? 0 : *cond.attribute_value.begin();
         }
     }
 
-    bool check(attributetype value) const {
+    inline __attribute__((always_inline)) bool check(const attributetype* attribute) const {
+        attributetype value = attribute[attribute_id];
+
         switch (op) {
             case ConditionOp::EQ:
                 return value == ref_value;
-                
             case ConditionOp::NE:
                 return value != ref_value;
-                
             case ConditionOp::GT:
                 return value > ref_value;
-                
             case ConditionOp::LT:
                 return value < ref_value;
-                
             case ConditionOp::GE:
                 return value >= ref_value;
-                
             case ConditionOp::LE:
                 return value <= ref_value;
-                
-            case ConditionOp::IN:
-                for (auto v : in_values) {
-                    if (value == v) {
-                        return true;
-                    }
+            case ConditionOp::IN: {
+                if (in_values_count == 0) return false;
+                for (uint32_t i = 0; i < in_values_count; ++i) {
+                    if (in_values_ptr[i] == value) return true;
                 }
                 return false;
-                
+            }
             default:
                 return true;
         }
     }
-    
+
 private:
-    ConditionOp getConditionOp(const std::string &opStr) const
-    {
+    static ConditionOp getConditionOp(const std::string &opStr) {
         if (opStr == "==") return ConditionOp::EQ;
         if (opStr == "<")  return ConditionOp::LT;
         if (opStr == ">")  return ConditionOp::GT;
@@ -91,28 +98,39 @@ private:
 class OptimizedFilter
 {
 private:
-    std::vector<ConditionWrapper> compiled_conditions_;
+    std::vector<FastCondition> conditions_;
+    std::vector<attributetype> in_values_storage_;
 
 public:
-    OptimizedFilter(const std::vector<FilterConditionWithId> &filtering_conditions)
-    {
-        compiled_conditions_.reserve(filtering_conditions.size());
-        for (const auto &cond : filtering_conditions)
-        {
-            compiled_conditions_.emplace_back(cond);
+    OptimizedFilter() = default;
+
+    OptimizedFilter(const std::vector<FilterConditionWithId> &filtering_conditions) {
+        size_t total_in_values = 0;
+        for (const auto &cond : filtering_conditions) {
+            if (cond.op == "IN") {
+                total_in_values += cond.attribute_value.size();
+            }
+        }
+
+        in_values_storage_.reserve(total_in_values);
+        conditions_.reserve(filtering_conditions.size());
+
+        size_t storage_offset = 0;
+        for (const auto &cond : filtering_conditions) {
+            conditions_.emplace_back(cond, in_values_storage_, storage_offset);
         }
     }
 
-    bool check(attributetype *attribute) const
-    {
-        for (const auto &condition : compiled_conditions_)
-        {
-            attributetype value = attribute[condition.attribute_id];
-            if (!condition.check(value))
-            {
+    inline __attribute__((always_inline)) bool check(const attributetype* attribute) const {
+        for (const auto &condition : conditions_) {
+            if (!condition.check(attribute)) {
                 return false;
             }
         }
         return true;
+    }
+
+    size_t conditionCount() const {
+        return conditions_.size();
     }
 };

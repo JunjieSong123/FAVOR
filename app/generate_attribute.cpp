@@ -5,8 +5,6 @@
 #include <iomanip>
 
 #include "dataset.h"
-#include <nlohmann/json.hpp>
-using json = nlohmann::json;
 
 int main(int argc, char *argv[])
 {
@@ -35,29 +33,15 @@ int main(int argc, char *argv[])
     // random generator
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<> priceDist(0.0, 100.0);
     std::uniform_int_distribution<> intDist(0, 7);
-    std::uniform_int_distribution<> boolDist(0, 1);
 
     outFile << baseset.num << "\n" << 1 << "\n";
 
-    // price
-    outFile << "price\n";
+    // Different numbers represent different colors
+    outFile << "color\n";
     for (int i = 0; i < baseset.num; ++i) {
-        outFile << std::fixed << std::setprecision(2) << priceDist(gen) << "\n";
+        outFile << intDist(gen) << "\n";
     }
-
-    // // color
-    // outFile << "color\n";
-    // for (int i = 0; i < baseset.num; ++i) {
-    //     outFile << intDist(gen) << "\n";
-    // }
-
-    // // gender
-    // outFile << "gender\n";
-    // for (int i = 0; i < baseset.num; ++i) {
-    //     outFile << boolDist(gen) << "\n";
-    // }
 
     outFile.close();
     std::cout << "File successfully generated at: " << attribute_path << std::endl;

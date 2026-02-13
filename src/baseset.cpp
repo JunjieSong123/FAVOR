@@ -57,7 +57,7 @@ void BaseSet::get_attribute(const std::string &attribute_path)
             if (!std::getline(infile, line)) {
                 delete[] attribute;
                 attribute = nullptr;
-                throw std::runtime_error("Error: Unexpected end of file while sattribute_numipping empty lines for attribute " + 
+                throw std::runtime_error("Error: Unexpected end of file while skipping empty lines for attribute " +
                                        std::to_string(i));
             }
         }
@@ -81,7 +81,7 @@ void BaseSet::get_attribute(const std::string &attribute_path)
                 if (!std::getline(infile, line)) {
                     delete[] attribute;
                     attribute = nullptr;
-                    throw std::runtime_error("Error: Unexpected end of file while sattribute_numipping empty lines for attribute " + 
+                    throw std::runtime_error("Error: Unexpected end of file while skipping empty lines for attribute " +
                                            std::to_string(i) + ", position " + std::to_string(j));
                 }
             }

@@ -1,5 +1,15 @@
 #pragma once
 
+#include <cstring>
+#include <cstdint>
+#include <cmath>
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    #ifdef USE_SSE
+        #include <immintrin.h>
+    #endif
+#endif
+
 #include "hnswlib/hnswlib.h"
 #include "hnswlib/hnswalg.h"
 #include "filter_condition.h"
@@ -75,7 +85,7 @@ namespace favor
             attribute_offset_ = this->size_links_level0_ + this->data_size_ + sizeof(labeltype);
             this->offsetLevel0_ = 0;
 
-            this->data_level0_memory_ = (char *)malloc(this->max_elements_ * this->size_data_per_element_);
+            this->data_level0_memory_ = static_cast<char*>(malloc(this->max_elements_ * this->size_data_per_element_));
             if (this->data_level0_memory_ == nullptr)
                 throw std::runtime_error("Not enough memory");
 
@@ -83,16 +93,15 @@ namespace favor
 
             this->visited_list_pool_ = std::unique_ptr<VisitedListPool>(new VisitedListPool(1, max_elements));
 
-            // initializations for special treatment of the first node
             this->enterpoint_node_ = -1;
             this->maxlevel_ = -1;
 
-            this->linkLists_ = (char **)malloc(sizeof(void *) * this->max_elements_);
+            this->linkLists_ = static_cast<char**>(malloc(sizeof(void *) * this->max_elements_));
             if (this->linkLists_ == nullptr)
                 throw std::runtime_error("Not enough memory: HierarchicalNSW failed to allocate linklists");
             this->size_links_per_element_ = this->maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
-            this->mult_ = 1 / log(1.0 * this->M_);
-            this->revSize_ = 1.0 / this->mult_;
+            this->mult_ = 1.0f / std::log(1.0f * static_cast<float>(this->M_));
+            this->revSize_ = 1.0f / this->mult_;
         }
 
         struct CompareByFirst_
@@ -104,24 +113,21 @@ namespace favor
             }
         };
 
-        dist_t distFilter(float p) const // selectivity
+        dist_t distFilter(float p) const
         {
-            return (1 - p) * (this->ef_ - p) * delta_d / (2 * p);
-        }
-
-        bool stopSearch(dist_t candidate_dist, dist_t lowerBound, size_t num, size_t ef) const
-        {
-            return candidate_dist > lowerBound;
+            return (1.0f - p) * (static_cast<float>(this->ef_) - p) * delta_d / (2.0f * p);
         }
 
         inline void setAttribute(tableint internal_id, attributetype *attribute) const
         {
-            memcpy((this->data_level0_memory_ + internal_id * this->size_data_per_element_ + attribute_offset_), attribute, this->num_attribute_ * sizeof(attributetype));
+            memcpy((this->data_level0_memory_ + internal_id * this->size_data_per_element_ + attribute_offset_), 
+                   attribute, this->num_attribute_ * sizeof(attributetype));
         }
 
         inline attributetype *getAttributeByInternalId(tableint internal_id) const
         {
-            return (attributetype *)(this->data_level0_memory_ + internal_id * this->size_data_per_element_ + attribute_offset_);
+            return reinterpret_cast<attributetype*>(this->data_level0_memory_ + 
+                                                     internal_id * this->size_data_per_element_ + attribute_offset_);
         }
 
         void saveIndex(const std::string &location)
@@ -148,19 +154,22 @@ namespace favor
             writeBinaryPOD(output, attribute_offset_);
             writeBinaryPOD(output, delta_d);
 
-            output.write(this->data_level0_memory_, this->cur_element_count * this->size_data_per_element_);
+            output.write(this->data_level0_memory_, 
+                         static_cast<std::streamsize>(this->cur_element_count * this->size_data_per_element_));
 
             for (size_t i = 0; i < this->cur_element_count; i++)
             {
-                unsigned int linkListSize = this->element_levels_[i] > 0 ? this->size_links_per_element_ * this->element_levels_[i] : 0;
+                unsigned int linkListSize = this->element_levels_[i] > 0 ? 
+                    static_cast<unsigned int>(this->size_links_per_element_ * this->element_levels_[i]) : 0;
                 writeBinaryPOD(output, linkListSize);
                 if (linkListSize)
-                    output.write(this->linkLists_[i], linkListSize);
+                    output.write(this->linkLists_[i], static_cast<std::streamsize>(linkListSize));
             }
             output.close();
         }
 
-        void loadIndex(const std::string &location, SpaceInterface<dist_t> *s, size_t max_elements_i = 0, size_t ef = 100)
+        void loadIndex(const std::string &location, SpaceInterface<dist_t> *s, 
+                       size_t max_elements_i = 0, size_t ef = 100)
         {
             std::ifstream input(location, std::ios::binary);
 
@@ -168,7 +177,6 @@ namespace favor
                 throw std::runtime_error("Cannot open file");
 
             this->clear();
-            // get file size:
             input.seekg(0, input.end);
             std::streampos total_filesize = input.tellg();
             input.seekg(0, input.beg);
@@ -203,8 +211,7 @@ namespace favor
 
             auto pos = input.tellg();
 
-            /// Optional - check if index is ok:
-            input.seekg(this->cur_element_count * this->size_data_per_element_, input.cur);
+            input.seekg(static_cast<std::streamoff>(this->cur_element_count * this->size_data_per_element_), input.cur);
             for (size_t i = 0; i < this->cur_element_count; i++)
             {
                 if (input.tellg() < 0 || input.tellg() >= total_filesize)
@@ -216,37 +223,34 @@ namespace favor
                 readBinaryPOD(input, linkListSize);
                 if (linkListSize != 0)
                 {
-                    input.seekg(linkListSize, input.cur);
+                    input.seekg(static_cast<std::streamoff>(linkListSize), input.cur);
                 }
             }
 
-            // throw exception if it either corrupted or old index
             if (input.tellg() != total_filesize)
                 throw std::runtime_error("Index seems to be corrupted or unsupported");
 
             input.clear();
-            /// Optional check end
-
             input.seekg(pos, input.beg);
 
-            this->data_level0_memory_ = (char *)malloc(max_elements * this->size_data_per_element_);
+            this->data_level0_memory_ = static_cast<char*>(malloc(max_elements * this->size_data_per_element_));
             if (this->data_level0_memory_ == nullptr)
                 throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
-            input.read(this->data_level0_memory_, this->cur_element_count * this->size_data_per_element_);
+            input.read(this->data_level0_memory_, 
+                       static_cast<std::streamsize>(this->cur_element_count * this->size_data_per_element_));
 
             this->size_links_per_element_ = this->maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
-
             this->size_links_level0_ = this->maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
             std::vector<std::mutex>(max_elements).swap(this->link_list_locks_);
             std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(this->label_op_locks_);
 
             this->visited_list_pool_.reset(new VisitedListPool(1, max_elements));
 
-            this->linkLists_ = (char **)malloc(sizeof(void *) * max_elements);
+            this->linkLists_ = static_cast<char**>(malloc(sizeof(void *) * max_elements));
             if (this->linkLists_ == nullptr)
                 throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
             this->element_levels_ = std::vector<int>(max_elements);
-            this->revSize_ = 1.0 / this->mult_;
+            this->revSize_ = 1.0f / this->mult_;
             this->ef_ = ef;
             for (size_t i = 0; i < this->cur_element_count; i++)
             {
@@ -260,21 +264,22 @@ namespace favor
                 }
                 else
                 {
-                    this->element_levels_[i] = linkListSize / this->size_links_per_element_;
-                    this->linkLists_[i] = (char *)malloc(linkListSize);
+                    this->element_levels_[i] = static_cast<int>(linkListSize / this->size_links_per_element_);
+                    this->linkLists_[i] = static_cast<char*>(malloc(linkListSize));
                     if (this->linkLists_[i] == nullptr)
                         throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklist");
-                    input.read(this->linkLists_[i], linkListSize);
+                    input.read(this->linkLists_[i], static_cast<std::streamsize>(linkListSize));
                 }
             }
 
             input.close();
-
             return;
         }
 
         void getNeighborsByHeuristic2(
-            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> &top_candidates,
+            std::priority_queue<std::pair<dist_t, tableint>, 
+                                std::vector<std::pair<dist_t, tableint>>, 
+                                CompareByFirst_> &top_candidates,
             const size_t M)
         {
             if (top_candidates.size() < M)
@@ -282,24 +287,27 @@ namespace favor
                 return;
             }
 
-            std::priority_queue<std::pair<dist_t, tableint>> queue_closest;
-            std::vector<std::pair<dist_t, tableint>> return_list;
-            while (top_candidates.size() > 0)
+            std::vector<std::pair<dist_t, tableint>> candidates;
+            candidates.reserve(top_candidates.size());
+            while (!top_candidates.empty())
             {
-                queue_closest.emplace(-top_candidates.top().first, top_candidates.top().second);
+                candidates.push_back(top_candidates.top());
                 top_candidates.pop();
             }
 
-            while (queue_closest.size())
+            std::reverse(candidates.begin(), candidates.end());
+            std::vector<std::pair<dist_t, tableint>> return_list;
+            return_list.reserve(M);
+
+            for (const auto &curent_pair : candidates)
             {
                 if (return_list.size() >= M)
                     break;
-                std::pair<dist_t, tableint> curent_pair = queue_closest.top();
-                dist_t dist_to_query = -curent_pair.first;
-                queue_closest.pop();
+                
                 bool good = true;
+                dist_t dist_to_query = curent_pair.first;
 
-                for (std::pair<dist_t, tableint> second_pair : return_list)
+                for (const auto &second_pair : return_list)
                 {
                     dist_t curdist =
                         this->fstdistfunc_(this->getDataByInternalId(second_pair.second),
@@ -317,16 +325,18 @@ namespace favor
                 }
             }
 
-            for (std::pair<dist_t, tableint> curent_pair : return_list)
+            for (const auto &curent_pair : return_list)
             {
-                top_candidates.emplace(-curent_pair.first, curent_pair.second);
+                top_candidates.emplace(curent_pair.first, curent_pair.second);
             }
         }
 
         tableint mutuallyConnectNewElement(
             const void *data_point,
             tableint cur_c,
-            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> &top_candidates,
+            std::priority_queue<std::pair<dist_t, tableint>, 
+                                std::vector<std::pair<dist_t, tableint>>, 
+                                CompareByFirst_> &top_candidates,
             int level)
         {
             size_t Mcurmax = level ? this->maxM_ : this->maxM0_;
@@ -344,8 +354,6 @@ namespace favor
             tableint next_closest_entry_point = selectedNeighbors.back();
 
             {
-                // lock only during the update
-                // because during the addition the lock for cur_c is already acquired
                 std::unique_lock<std::mutex> lock(this->link_list_locks_[cur_c], std::defer_lock);
                 linklistsizeint *ll_cur;
                 if (level == 0)
@@ -358,7 +366,7 @@ namespace favor
                     throw std::runtime_error("The newly inserted element should have blank link list");
                 }
                 this->setListCount(ll_cur, selectedNeighbors.size());
-                tableint *data = (tableint *)(ll_cur + 1);
+                tableint *data = reinterpret_cast<tableint*>(ll_cur + 1);
                 for (size_t idx = 0; idx < selectedNeighbors.size(); idx++)
                 {
                     if (data[idx])
@@ -388,11 +396,9 @@ namespace favor
                 if (level > this->element_levels_[selectedNeighbors[idx]])
                     throw std::runtime_error("Trying to make a link on a non-existent level");
 
-                tableint *data = (tableint *)(ll_other + 1);
-
+                tableint *data = reinterpret_cast<tableint*>(ll_other + 1);
                 bool is_cur_c_present = false;
 
-                // If cur_c is already present in the neighboring connections of `selectedNeighbors[idx]` then no need to modify any connections or run the heuristics.
                 if (!is_cur_c_present)
                 {
                     if (sz_link_list_other < Mcurmax)
@@ -402,18 +408,20 @@ namespace favor
                     }
                     else
                     {
-                        // finding the "weakest" element to replace it with the new one
-                        dist_t d_max = this->fstdistfunc_(this->getDataByInternalId(cur_c), this->getDataByInternalId(selectedNeighbors[idx]),
-                                                          this->dist_func_param_);
-                        // Heuristic:
-                        std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> candidates;
+                        dist_t d_max = this->fstdistfunc_(this->getDataByInternalId(cur_c), 
+                                                           this->getDataByInternalId(selectedNeighbors[idx]),
+                                                           this->dist_func_param_);
+                        std::priority_queue<std::pair<dist_t, tableint>, 
+                                           std::vector<std::pair<dist_t, tableint>>, 
+                                           CompareByFirst_> candidates;
                         candidates.emplace(d_max, cur_c);
 
                         for (size_t j = 0; j < sz_link_list_other; j++)
                         {
                             candidates.emplace(
-                                this->fstdistfunc_(this->getDataByInternalId(data[j]), this->getDataByInternalId(selectedNeighbors[idx]),
-                                                   this->dist_func_param_),
+                                this->fstdistfunc_(this->getDataByInternalId(data[j]), 
+                                                  this->getDataByInternalId(selectedNeighbors[idx]),
+                                                  this->dist_func_param_),
                                 data[j]);
                         }
 
@@ -427,19 +435,7 @@ namespace favor
                             indx++;
                         }
 
-                        this->setListCount(ll_other, indx);
-                        // Nearest K:
-                        /*int indx = -1;
-                        for (int j = 0; j < sz_link_list_other; j++) {
-                            dist_t d = fstdistfunc_(getDataByInternalId(data[j]), getDataByInternalId(rez[idx]), dist_func_param_);
-                            if (d > d_max) {
-                                indx = j;
-                                d_max = d;
-                            }
-                        }
-                        if (indx >= 0) {
-                            data[indx] = cur_c;
-                        } */
+                        this->setListCount(ll_other, static_cast<linklistsizeint>(indx));
                     }
                 }
             }
@@ -447,15 +443,21 @@ namespace favor
             return next_closest_entry_point;
         }
 
-        std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_>
+        std::priority_queue<std::pair<dist_t, tableint>, 
+                           std::vector<std::pair<dist_t, tableint>>, 
+                           CompareByFirst_>
         searchBaseLayerFilter(tableint ep_id, const void *data_point, int layer)
         {
             VisitedList *vl = this->visited_list_pool_->getFreeVisitedList();
             vl_type *visited_array = vl->mass;
             vl_type visited_array_tag = vl->curV;
 
-            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> top_candidates;
-            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> candidateSet;
+            std::priority_queue<std::pair<dist_t, tableint>, 
+                               std::vector<std::pair<dist_t, tableint>>, 
+                               CompareByFirst_> top_candidates;
+            std::priority_queue<std::pair<dist_t, tableint>, 
+                               std::vector<std::pair<dist_t, tableint>>, 
+                               CompareByFirst_> candidateSet;
 
             dist_t lowerBound;
             if (!this->isMarkedDeleted(ep_id))
@@ -482,24 +484,19 @@ namespace favor
                 candidateSet.pop();
 
                 tableint curNodeNum = curr_el_pair.second;
-
                 std::unique_lock<std::mutex> lock(this->link_list_locks_[curNodeNum]);
 
-                int *data; // = (int *)(linkList0_ + curNodeNum * size_links_per_element0_);
+                int *data;
                 if (layer == 0)
-                {
-                    data = (int *)this->get_linklist0(curNodeNum);
-                }
+                    data = reinterpret_cast<int*>(this->get_linklist0(curNodeNum));
                 else
-                {
-                    data = (int *)this->get_linklist(curNodeNum, layer);
-                    //                    data = (int *) (linkLists_[curNodeNum] + (layer - 1) * size_links_per_element_);
-                }
-                size_t size = this->getListCount((linklistsizeint *)data);
-                tableint *datal = (tableint *)(data + 1);
+                    data = reinterpret_cast<int*>(this->get_linklist(curNodeNum, layer));
+
+                size_t size = this->getListCount(reinterpret_cast<linklistsizeint*>(data));
+                tableint *datal = reinterpret_cast<tableint*>(data + 1);
 #ifdef USE_SSE
-                _mm_prefetch((char *)(visited_array + *(data + 1)), _MM_HINT_T0);
-                _mm_prefetch((char *)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
+                _mm_prefetch(reinterpret_cast<char*>(visited_array + *(data + 1)), _MM_HINT_T0);
+                _mm_prefetch(reinterpret_cast<char*>(visited_array + *(data + 1) + 64), _MM_HINT_T0);
                 _mm_prefetch(this->getDataByInternalId(*datal), _MM_HINT_T0);
                 _mm_prefetch(this->getDataByInternalId(*(datal + 1)), _MM_HINT_T0);
 #endif
@@ -507,9 +504,8 @@ namespace favor
                 for (size_t j = 0; j < size; j++)
                 {
                     tableint candidate_id = *(datal + j);
-//                    if (candidate_id == 0) continue;
 #ifdef USE_SSE
-                    _mm_prefetch((char *)(visited_array + *(datal + j + 1)), _MM_HINT_T0);
+                    _mm_prefetch(reinterpret_cast<char*>(visited_array + *(datal + j + 1)), _MM_HINT_T0);
                     _mm_prefetch(this->getDataByInternalId(*(datal + j + 1)), _MM_HINT_T0);
 #endif
                     if (visited_array[candidate_id] == visited_array_tag)
@@ -537,115 +533,173 @@ namespace favor
                 }
             }
             this->visited_list_pool_->releaseVisitedList(vl);
-
             return top_candidates;
         }
 
-        std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_>
+        std::priority_queue<std::pair<dist_t, tableint>, 
+                           std::vector<std::pair<dist_t, tableint>>, 
+                           CompareByFirst_>
         searchBaseLayerSTFilter(tableint ep_id,
                                 const void *data_point,
                                 size_t ef,
+                                size_t k,
                                 dist_t e_distance,
-                                OptimizedFilter conditions) const
+                                const OptimizedFilter& conditions) const
         {
             VisitedList *vl = this->visited_list_pool_->getFreeVisitedList();
             vl_type *visited_array = vl->mass;
             vl_type visited_array_tag = vl->curV;
 
-            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> top_candidates;
-            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> candidate_set;
+            std::priority_queue<std::pair<dist_t, tableint>, 
+                               std::vector<std::pair<dist_t, tableint>>, 
+                               CompareByFirst_> top_candidates;
+            std::priority_queue<std::pair<dist_t, tableint>, 
+                               std::vector<std::pair<dist_t, tableint>>, 
+                               CompareByFirst_> candidate_set;
 
             dist_t lowerBound;
-            // get the entry point for the top
             char *ep_data = this->getDataByInternalId(ep_id);
-            // calculate the distance between entry and query.
             dist_t dist;
-            if (conditions.check(getAttributeByInternalId(ep_id)))
-                dist = this->fstdistfunc_(data_point, ep_data, this->dist_func_param_);
-            else
-                dist = this->fstdistfunc_(data_point, ep_data, this->dist_func_param_) + e_distance;
+            
+            bool ep_qualified = conditions.check(getAttributeByInternalId(ep_id));
+            
+            dist_t base_dist = this->fstdistfunc_(data_point, ep_data, this->dist_func_param_);
+            dist = ep_qualified ? base_dist : base_dist + e_distance;
+            
             lowerBound = dist;
             top_candidates.emplace(dist, ep_id);
             candidate_set.emplace(-dist, ep_id);
 
             visited_array[ep_id] = visited_array_tag;
-
-            size_t num_in_range = 0;
-            // int length = 0;
+            size_t num_in_range = ep_qualified ? 1 : 0;
 
             while (!candidate_set.empty())
             {
-                // candidate_set.top() is the closest point
                 std::pair<dist_t, tableint> current_node_pair = candidate_set.top();
                 dist_t candidate_dist = -current_node_pair.first;
 
-                // if part of vectors in candidate are in range, stop searching
-                if (stopSearch(candidate_dist, lowerBound, num_in_range, ef))
-                {
-                    // std::cout << num_in_range << " ";
+                if (candidate_dist > 0.95 * lowerBound && num_in_range > k * 0.5)
                     break;
-                }
 
-                // pop the closest point
                 candidate_set.pop();
-
                 tableint current_node_id = current_node_pair.second;
-
-                // get the closest neighbor
-                int *data = (int *)this->get_linklist0(current_node_id);
-                size_t size = this->getListCount((linklistsizeint *)data);
+                int *data = reinterpret_cast<int*>(this->get_linklist0(current_node_id));
+                size_t size = this->getListCount(reinterpret_cast<linklistsizeint*>(data));
 
 #ifdef USE_SSE
-                _mm_prefetch((char *)(visited_array + *(data + 1)), _MM_HINT_T0);
-                _mm_prefetch((char *)(visited_array + *(data + 1) + 64), _MM_HINT_T0);
-                _mm_prefetch(data_level0_memory_ + (*(data + 1)) * size_data_per_element_ + offsetData_, _MM_HINT_T0);
-                _mm_prefetch((char *)(data + 2), _MM_HINT_T0);
+                _mm_prefetch(reinterpret_cast<char*>(visited_array + *(data + 1)), _MM_HINT_T0);
+                _mm_prefetch(reinterpret_cast<char*>(visited_array + *(data + 1) + 64), _MM_HINT_T0);
+                _mm_prefetch(this->data_level0_memory_ + 
+                            static_cast<size_t>(*(data + 1)) * this->size_data_per_element_ + this->offsetData_, 
+                            _MM_HINT_T0);
+                if (size > 1) {
+                    _mm_prefetch(reinterpret_cast<char*>(data + 2), _MM_HINT_T0);
+                }
 #endif
 
-                // visit all the neighbors
-                for (size_t j = 1; j <= size; j++)
+                size_t j = 1;
+                for (; j + 1 <= size; j += 2)
                 {
-                    int candidate_id = *(data + j);
+                    int candidate_id1 = *(data + j);
+                    int candidate_id2 = *(data + j + 1);
+                    
 #ifdef USE_SSE
-                    _mm_prefetch((char *)(visited_array + *(data + j + 1)), _MM_HINT_T0);
-                    _mm_prefetch(data_level0_memory_ + (*(data + j + 1)) * size_data_per_element_ + offsetData_,
-                                 _MM_HINT_T0); ////////////
+                    if (j + 2 <= size) {
+                        _mm_prefetch(reinterpret_cast<char*>(visited_array + *(data + j + 2)), _MM_HINT_T0);
+                        _mm_prefetch(this->data_level0_memory_ + 
+                                    static_cast<size_t>(*(data + j + 2)) * this->size_data_per_element_ + this->offsetData_,
+                                    _MM_HINT_T0);
+                    }
 #endif
-                    // check if the point is visited
-                    if (!(visited_array[candidate_id] == visited_array_tag))
+                    if (visited_array[candidate_id1] != visited_array_tag)
                     {
-                        visited_array[candidate_id] = visited_array_tag; // mark the point which is visited
-
-                        char *currObj1 = (this->getDataByInternalId(candidate_id));
-                        dist_t dist1;
-                        if (conditions.check(getAttributeByInternalId(candidate_id)))
-                            dist1 = this->fstdistfunc_(data_point, currObj1, this->dist_func_param_);
-                        else
-                            dist1 = this->fstdistfunc_(data_point, currObj1, this->dist_func_param_) + e_distance;
-                        bool flag_consider_candidate;
-                        flag_consider_candidate = top_candidates.size() < ef || lowerBound > dist1;
-
-                        if (flag_consider_candidate)
+                        visited_array[candidate_id1] = visited_array_tag;
+                        char *currObj1 = this->getDataByInternalId(candidate_id1);
+                        
+                        bool candidate_qualified = conditions.check(getAttributeByInternalId(candidate_id1));
+                        // Note: Exact distance computation for NTD vectors is unnecessary here.
+                        dist_t dist1 = candidate_qualified ? 
+                            this->fstdistfunc_(data_point, currObj1, this->dist_func_param_) :
+                            FastApproxL2Sqr(data_point, currObj1, this->dist_func_param_) + e_distance;
+                        
+                        if (top_candidates.size() < ef || lowerBound > dist1)
                         {
-                            candidate_set.emplace(-dist1, candidate_id);
-                            if (conditions.check(getAttributeByInternalId(candidate_id)))
+                            candidate_set.emplace(-dist1, candidate_id1);
+                            if (candidate_qualified)
                                 num_in_range++;
-#ifdef USE_SSE
-                            _mm_prefetch(data_level0_memory_ + candidate_set.top().second * size_data_per_element_ +
-                                             offsetLevel0_, ///////////
-                                         _MM_HINT_T0);      ////////////////////////
-#endif
-                            top_candidates.emplace(dist1, candidate_id);
+                            top_candidates.emplace(dist1, candidate_id1);
 
-                            bool flag_remove_extra = false;
-
-                            flag_remove_extra = top_candidates.size() > ef;
-
-                            while (flag_remove_extra)
+                            if (top_candidates.size() > ef)
                             {
                                 auto evicted = top_candidates.top();
                                 top_candidates.pop();
-                                flag_remove_extra = top_candidates.size() > ef;
+                                
+                                if (conditions.check(getAttributeByInternalId(evicted.second)))
+                                    num_in_range--;
+                            }
+
+                            if (!top_candidates.empty())
+                                lowerBound = top_candidates.top().first;
+                        }
+                    }
+                    
+                    if (visited_array[candidate_id2] != visited_array_tag)
+                    {
+                        visited_array[candidate_id2] = visited_array_tag;
+                        char *currObj2 = this->getDataByInternalId(candidate_id2);
+                        
+                        bool candidate_qualified = conditions.check(getAttributeByInternalId(candidate_id2));
+                        dist_t dist2 = candidate_qualified ? 
+                            this->fstdistfunc_(data_point, currObj2, this->dist_func_param_) :
+                            FastApproxL2Sqr(data_point, currObj2, this->dist_func_param_) + e_distance;
+                        
+                        if (top_candidates.size() < ef || lowerBound > dist2)
+                        {
+                            candidate_set.emplace(-dist2, candidate_id2);
+                            if (candidate_qualified)
+                                num_in_range++;
+                            top_candidates.emplace(dist2, candidate_id2);
+
+                            if (top_candidates.size() > ef)
+                            {
+                                auto evicted = top_candidates.top();
+                                top_candidates.pop();
+                                
+                                if (conditions.check(getAttributeByInternalId(evicted.second)))
+                                    num_in_range--;
+                            }
+
+                            if (!top_candidates.empty())
+                                lowerBound = top_candidates.top().first;
+                        }
+                    }
+                }
+                
+                for (; j <= size; ++j)
+                {
+                    int candidate_id = *(data + j);
+                    if (visited_array[candidate_id] != visited_array_tag)
+                    {
+                        visited_array[candidate_id] = visited_array_tag;
+                        char *currObj1 = this->getDataByInternalId(candidate_id);
+                        
+                        bool candidate_qualified = conditions.check(getAttributeByInternalId(candidate_id));
+                        dist_t dist1 = candidate_qualified ? 
+                            this->fstdistfunc_(data_point, currObj1, this->dist_func_param_) :
+                            FastApproxL2Sqr(data_point, currObj1, this->dist_func_param_) + e_distance;
+                        
+                        if (top_candidates.size() < ef || lowerBound > dist1)
+                        {
+                            candidate_set.emplace(-dist1, candidate_id);
+                            if (candidate_qualified)
+                                num_in_range++;
+                            top_candidates.emplace(dist1, candidate_id);
+
+                            if (top_candidates.size() > ef)
+                            {
+                                auto evicted = top_candidates.top();
+                                top_candidates.pop();
+                                
                                 if (conditions.check(getAttributeByInternalId(evicted.second)))
                                     num_in_range--;
                             }
@@ -664,18 +718,14 @@ namespace favor
         void addPoint(const void *data_point, labeltype label, attributetype *attribute, bool replace_deleted = false)
         {
             if ((this->allow_replace_deleted_ == false) && (replace_deleted == true))
-            {
                 throw std::runtime_error("Replacement of deleted elements is disabled in constructor");
-            }
 
-            // lock all operations with element by label
             std::unique_lock<std::mutex> lock_label(this->getLabelOpMutex(label));
             if (!replace_deleted)
             {
                 addPoint(data_point, label, -1, attribute);
                 return;
             }
-            // check if there is vacant place
             tableint internal_id_replaced;
             std::unique_lock<std::mutex> lock_deleted_elements(this->deleted_elements_lock);
             bool is_vacant_place = !this->deleted_elements.empty();
@@ -686,15 +736,12 @@ namespace favor
             }
             lock_deleted_elements.unlock();
 
-            // if there is no vacant place then add or update point
-            // else add point to vacant place
             if (!is_vacant_place)
             {
                 addPoint(data_point, label, -1, attribute);
             }
             else
             {
-                // we assume that there are no concurrent operations on deleted element
                 labeltype label_replaced = this->getExternalLabel(internal_id_replaced);
                 this->setExternalLabel(internal_id_replaced, label);
                 setAttribute(internal_id_replaced, attribute);
@@ -721,25 +768,18 @@ namespace favor
                     if (this->allow_replace_deleted_)
                     {
                         if (this->isMarkedDeleted(existingInternalId))
-                        {
                             throw std::runtime_error("Can't use addPoint to update deleted elements if replacement of deleted elements is enabled.");
-                        }
                     }
                     lock_table.unlock();
 
                     if (this->isMarkedDeleted(existingInternalId))
-                    {
                         this->unmarkDeletedInternal(existingInternalId);
-                    }
                     this->updatePoint(data_point, existingInternalId, 1.0);
-
                     return existingInternalId;
                 }
 
                 if (this->cur_element_count >= this->max_elements_)
-                {
                     throw std::runtime_error("The number of elements exceeds the specified limit");
-                }
 
                 cur_c = this->cur_element_count;
                 this->cur_element_count++;
@@ -759,16 +799,16 @@ namespace favor
                 templock.unlock();
             tableint currObj = this->enterpoint_node_;
 
-            memset(this->data_level0_memory_ + cur_c * this->size_data_per_element_ + this->offsetLevel0_, 0, this->size_data_per_element_);
+            memset(this->data_level0_memory_ + cur_c * this->size_data_per_element_ + this->offsetLevel0_, 
+                   0, this->size_data_per_element_);
 
-            // Initialisation of the data, label and attribute
             memcpy(this->getExternalLabeLp(cur_c), &label, sizeof(labeltype));
             memcpy(this->getDataByInternalId(cur_c), data_point, this->data_size_);
             setAttribute(cur_c, attribute);
 
             if (curlevel)
             {
-                this->linkLists_[cur_c] = (char *)malloc(this->size_links_per_element_ * curlevel + 1);
+                this->linkLists_[cur_c] = static_cast<char*>(malloc(this->size_links_per_element_ * curlevel + 1));
                 if (this->linkLists_[cur_c] == nullptr)
                     throw std::runtime_error("Not enough memory: addPoint failed to allocate linklist");
                 memset(this->linkLists_[cur_c], 0, this->size_links_per_element_ * curlevel + 1);
@@ -776,12 +816,12 @@ namespace favor
 
             dist_t local_delta_d = 0;
 
-            if ((signed)currObj != -1)
+            if (static_cast<signed>(currObj) != -1)
             {
                 if (curlevel < maxlevelcopy)
                 {
                     dist_t curdist = this->fstdistfunc_(data_point, this->getDataByInternalId(currObj), this->dist_func_param_);
-                    for (int level = maxlevelcopy; level > curlevel; level--)
+                    for (int lvl = maxlevelcopy; lvl > curlevel; lvl--)
                     {
                         bool changed = true;
                         while (changed)
@@ -789,10 +829,10 @@ namespace favor
                             changed = false;
                             unsigned int *data;
                             std::unique_lock<std::mutex> lock(this->link_list_locks_[currObj]);
-                            data = this->get_linklist(currObj, level);
+                            data = this->get_linklist(currObj, lvl);
                             int size = this->getListCount(data);
 
-                            tableint *datal = (tableint *)(data + 1);
+                            tableint *datal = reinterpret_cast<tableint*>(data + 1);
                             for (int i = 0; i < size; i++)
                             {
                                 tableint cand = datal[i];
@@ -810,17 +850,18 @@ namespace favor
                     }
                 }
 
-                for (int level = std::min(curlevel, maxlevelcopy); level >= 0; level--)
+                for (int lvl = std::min(curlevel, maxlevelcopy); lvl >= 0; lvl--)
                 {
-                    if (level > maxlevelcopy || level < 0) // possible?
+                    if (lvl > maxlevelcopy || lvl < 0)
                         throw std::runtime_error("Level error");
-                    std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> top_candidates = searchBaseLayerFilter(
-                        currObj, data_point, level);
+                    std::priority_queue<std::pair<dist_t, tableint>, 
+                                       std::vector<std::pair<dist_t, tableint>>, 
+                                       CompareByFirst_> top_candidates = searchBaseLayerFilter(
+                        currObj, data_point, lvl);
 
-                    // delta_d
-                    if (level == 0 && top_candidates.size() == this->ef_construction_)
+                    if (lvl == 0 && top_candidates.size() == this->ef_construction_)
                     {
-                        dist_t rate = this->ef_construction_ - 10;
+                        dist_t rate = static_cast<dist_t>(this->ef_construction_ - 10);
                         auto temp = top_candidates;
                         std::vector<std::pair<dist_t, tableint>> elements;
                         while (!temp.empty())
@@ -830,14 +871,13 @@ namespace favor
                         }
 
                         dist_t diff = elements[0].first - elements[elements.size() - 10].first;
-                        local_delta_d += 5 * diff / (rate * this->max_elements_);
+                        local_delta_d += 5.0f * diff / (rate * static_cast<dist_t>(this->max_elements_));
                     }
-                    currObj = this->mutuallyConnectNewElement(data_point, cur_c, top_candidates, level);
+                    currObj = this->mutuallyConnectNewElement(data_point, cur_c, top_candidates, lvl);
                 }
             }
             else
             {
-                // Do nothing for the first element
                 this->enterpoint_node_ = 0;
                 this->maxlevel_ = curlevel;
             }
@@ -845,7 +885,6 @@ namespace favor
             std::lock_guard<std::mutex> lock(delta_mutex);
             delta_d += local_delta_d;
 
-            // Releasing lock for the maximum level
             if (curlevel > maxlevelcopy)
             {
                 this->enterpoint_node_ = cur_c;
@@ -855,7 +894,7 @@ namespace favor
         }
 
         std::priority_queue<std::pair<dist_t, labeltype>>
-        searchGraph(const void *query_data, size_t k, float p, OptimizedFilter conditions) const
+        searchGraph(const void *query_data, size_t k, float p, const OptimizedFilter& conditions) const
         {
             std::priority_queue<std::pair<dist_t, labeltype>> result;
             if (this->cur_element_count == 0)
@@ -864,30 +903,23 @@ namespace favor
             dist_t e_distance = distFilter(p);
 
             tableint currObj = this->enterpoint_node_;
-            // calculate the distance between query and enterpoint
             dist_t curdist = this->fstdistfunc_(query_data, this->getDataByInternalId(this->enterpoint_node_), this->dist_func_param_);
-            // visit from top to bottom, get the closest point currObj
             for (int level = this->maxlevel_; level > 0; level--)
             {
                 bool changed = true;
                 while (changed)
                 {
                     changed = false;
-                    unsigned int *data;
-
-                    // get the neighbor list of currObj at level
-                    data = (unsigned int *)this->get_linklist(currObj, level);
+                    unsigned int *data = reinterpret_cast<unsigned int*>(this->get_linklist(currObj, level));
                     int size = this->getListCount(data);
 
-                    tableint *datal = (tableint *)(data + 1);
-                    // visit the neighbors of currObj
+                    tableint *datal = reinterpret_cast<tableint*>(data + 1);
                     for (int i = 0; i < size; i++)
                     {
                         tableint cand = datal[i];
                         if (cand < 0 || cand > this->max_elements_)
                             throw std::runtime_error("cand error");
                         dist_t d = this->fstdistfunc_(query_data, this->getDataByInternalId(cand), this->dist_func_param_);
-                        // if the distance is lower the curdist, continue visiting.
                         if (d < curdist)
                         {
                             curdist = d;
@@ -898,33 +930,41 @@ namespace favor
                 }
             }
 
-            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst_> top_candidates;
-            top_candidates = searchBaseLayerSTFilter(currObj, query_data, std::max(this->ef_, k), e_distance / this->ef_, conditions);
-            while (top_candidates.size() > 0)
+            size_t ef = std::max(this->ef_, k);
+            auto top_candidates = searchBaseLayerSTFilter(currObj, query_data, ef, k, e_distance / static_cast<dist_t>(this->ef_), conditions);
+            
+            std::vector<std::pair<dist_t, labeltype>> valid_results;
+            valid_results.reserve(std::min(k, top_candidates.size()));
+            
+            while (!top_candidates.empty())
             {
                 std::pair<dist_t, tableint> rez = top_candidates.top();
+                
                 attributetype *attribute = getAttributeByInternalId(rez.second);
                 if (conditions.check(attribute))
                 {
-                    result.push(std::pair<dist_t, labeltype>(rez.first, this->getExternalLabel(rez.second)));
+                    valid_results.emplace_back(rez.first, this->getExternalLabel(rez.second));
                 }
-
                 top_candidates.pop();
             }
+            
+            for (const auto &valid_result : valid_results)
+                result.push(valid_result);
+            
             while (result.size() < k)
-                result.push(std::pair<dist_t, labeltype>(1000000, -1));
+                result.push(std::pair<dist_t, labeltype>(1000000.0f, -1));
+            
             while (result.size() > k)
-            {
                 result.pop();
-            }
 
             return result;
         }
 
         std::priority_queue<std::pair<dist_t, labeltype>>
-        searchBruteForce(const void *query_data, size_t k, OptimizedFilter conditions) const
+        searchBruteForce(const void *query_data, size_t k, const OptimizedFilter& conditions) const
         {
             std::priority_queue<std::pair<dist_t, labeltype>> result;
+            
             for (size_t i = 0; i < this->max_elements_; i++)
             {
                 if (conditions.check(getAttributeByInternalId(i)))
@@ -940,30 +980,52 @@ namespace favor
                 }
             }
             while (result.size() < k)
-                result.push(std::pair<dist_t, labeltype>(1000000, -1));
+                result.push(std::pair<dist_t, labeltype>(1000000.0f, -1));
             return result;
         }
 
-        float selectivityEstimator(OptimizedFilter conditions) const
+        float selectivityEstimator(const OptimizedFilter& conditions) const
         {
-            float p;
+            if (this->max_elements_ == 0)
+                return 0.0f;
+                
             size_t count = 0;
-            size_t sample_size = std::max(this->max_elements_ / 10000, static_cast<size_t>(1));
-            for (size_t i = 0; i < this->max_elements_; i += 10000)
+            size_t step, sample_size;
+            
+            if (this->max_elements_ <= 1000) {
+                step = 1;
+                sample_size = this->max_elements_;
+            } else if (this->max_elements_ <= 10000) {
+                step = 10;
+                sample_size = this->max_elements_ / 10;
+            } else if (this->max_elements_ <= 100000) {
+                step = 100;
+                sample_size = this->max_elements_ / 100;
+            } else {
+                sample_size = 10000;
+                step = this->max_elements_ / 10000;
+                if (step < 1) step = 1;
+            }
+            
+            for (size_t i = 0; i < this->max_elements_; i += step)
             {
                 if (conditions.check(getAttributeByInternalId(i)))
                     count++;
             }
-            p = (float)count / sample_size;
-            return p;
+            
+            if (sample_size == 0)
+                return 0.0f;
+            
+            return static_cast<float>(count) / static_cast<float>(sample_size);
         }
 
         std::priority_queue<std::pair<dist_t, labeltype>>
         searchKnn(const void *query_data, size_t k, std::vector<FilterConditionWithId> filtering_conditions) const
         {
             OptimizedFilter conditions(filtering_conditions);
+            
             float p = selectivityEstimator(conditions);
-            if (p > 0.01)
+            if (p > 0.01f)
                 return searchGraph(query_data, k, p, conditions);
             else
                 return searchBruteForce(query_data, k, conditions);

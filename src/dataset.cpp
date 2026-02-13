@@ -9,7 +9,7 @@
 
 void DataSet::read_data(const std::string &dataset_path)
 {
-    // get the suffix of filename
+    // Get file suffix
     std::string::size_type filepos = dataset_path.find_last_of('/') + 1;
     std::string filename = dataset_path.substr(filepos, dataset_path.length() - filepos);
     std::string suffix = filename.substr(filename.find_last_of('.') + 1);
@@ -62,11 +62,11 @@ void DataSet::read_data(const std::string &dataset_path)
             for (int j = 0; j < dim; j++)
             {
                 unsigned char data;
-                reader.read((char *)&data, datasize); 
-                float_vector.push_back(static_cast<float>(data)); // 转换为float
+                reader.read((char *)&data, datasize);
+                float_vector.push_back(static_cast<float>(data));
             }
-            vectors.emplace_back(float_vector); // 存储到总向量集合
-            vector_id.emplace_back(i);          // 记录向量ID
+            vectors.emplace_back(float_vector);
+            vector_id.emplace_back(i);
         }
         std::cout << "finish reading!" << std::endl;
     }
@@ -74,12 +74,3 @@ void DataSet::read_data(const std::string &dataset_path)
     reader.close();
 }
 
-// attribute = vector_id
-// void BaseSet::get_attribute()
-// {
-//     size_t attribute_size = attribute_num * num;
-//     attribute = (float *)malloc(sizeof(float) * attribute_size);
-//     for (int i = 0; i < num; i++)
-//         for (int j = 0; j < attribute_num; j++)
-//             *(attribute + i * attribute_num + j) = i;
-// }

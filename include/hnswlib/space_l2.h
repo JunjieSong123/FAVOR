@@ -19,6 +19,35 @@ L2Sqr(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
     return (res);
 }
 
+[[maybe_unused]] static float
+FastApproxL2Sqr(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
+    float *pVect1 = (float *) pVect1v;
+    float *pVect2 = (float *) pVect2v;
+    size_t qty = *((size_t *) qty_ptr);
+
+    float res = 0;
+    size_t i = 0;
+
+    #ifdef __GNUC__
+    #pragma GCC ivdep
+    #endif
+    for (; i + 4 <= qty; i += 4) {
+        float d0 = pVect1[i] - pVect2[i];
+        float d1 = pVect1[i + 1] - pVect2[i + 1];
+        float d2 = pVect1[i + 2] - pVect2[i + 2];
+        float d3 = pVect1[i + 3] - pVect2[i + 3];
+
+        res += d0 * d0 + d1 * d1 + d2 * d2 + d3 * d3;
+    }
+
+    for (; i < qty; ++i) {
+        float diff = pVect1[i] - pVect2[i];
+        res += diff * diff;
+    }
+
+    return res;
+}
+
 #if defined(USE_AVX512)
 
 // Favor using AVX512 if available.

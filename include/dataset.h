@@ -21,8 +21,8 @@ public:
 class BaseSet : public DataSet
 {
 public:
-    // attribute[vector_id][attribute_id]
-    float *attribute{nullptr}; // attribute[i][j] = attribute + (i * attribute_num + j)
+    // attribute[vector_id][attribute_id] = attribute + (vector_id * attribute_num + attribute_id)
+    float *attribute{nullptr};
 
     std::map<std::string, int> attribute_map;
 
