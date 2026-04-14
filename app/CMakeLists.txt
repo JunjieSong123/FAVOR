@@ -1,4 +1,4 @@
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 add_executable(generate_groundtruth generate_groundtruth.cpp)
 target_link_libraries(generate_groundtruth UTIL)
@@ -23,3 +23,9 @@ target_link_libraries(search UTIL)
 target_compile_options(search PRIVATE -Wall ${OpenMP_CXX_FLAGS})
 target_link_libraries(search ${OpenMP_CXX_FLAGS})
 target_link_libraries(search OpenMP::OpenMP_CXX)
+
+add_executable(generate_query_conditions generate_query_conditions.cpp)
+target_link_libraries(generate_query_conditions UTIL)
+target_compile_options(generate_query_conditions PRIVATE -Wall ${OpenMP_CXX_FLAGS})
+target_link_libraries(generate_query_conditions ${OpenMP_CXX_FLAGS})
+target_link_libraries(generate_query_conditions OpenMP::OpenMP_CXX)

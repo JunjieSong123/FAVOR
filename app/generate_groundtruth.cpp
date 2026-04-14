@@ -29,8 +29,8 @@ int main(int argc, char *argv[])
 {
     if (argc < 7)
     {
-        std::cerr << "Usage: " << argv[0] << " baseset_path" << " queryset_path" << " attribute_path" << "topk" << " groundtruth_path" << " expression\n"
-                  << "expression example: " << " \"age > 25 AND label IN [1,3,4]\"\n";
+        std::cerr << "Usage: " << argv[0] << " baseset_path" << " queryset_path" << " attribute_path" << "topk" << " groundtruth_path" << " condition_path\n"
+                  << "condition_path: path to file containing filtering conditions for each query\n";
         return 1;
     }
 
@@ -49,33 +49,13 @@ int main(int argc, char *argv[])
     queryset.read_data(queryset_path);
     baseset.get_attribute(attribute_path);
 
-    std::string expr = argv[6];
-    try
-    {
-        Tokenizer tokenizer(expr);
-        std::vector<Token> tokens = tokenizer.tokenize();
-
-        Parser parser(tokens);
-        std::unique_ptr<Condition> ast = parser.parse();
-
-        std::cout << "Filtering Conditions:\n";
-        ast->print();
-        ast->trans(queryset.filtering_conditions);
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "Error: " << e.what() << std::endl;
-        return 1;
-    }
+    std::string condition_path = argv[6];
+    queryset.load_filtering_conditions(condition_path);
 
     std::cout << "begin computing groundtruth" << std::endl;
 
     std::vector<std::vector<int>> temp_groundtruth(queryset.num);
     std::vector<float> temp_distance(queryset.num);
-
-    // float temp_distance_x[20][1000];
-
-    // omp_set_num_threads(dynamic);
 
 #pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < queryset.num; i++)
@@ -83,7 +63,7 @@ int main(int argc, char *argv[])
         std::vector<std::pair<int, float>> gt_dist;
         for (int j = 0; j < baseset.num; j++)
         {
-            if (!queryset.check_all_conditions(baseset.attribute + j * baseset.attribute_num, queryset.filtering_conditions, baseset.attribute_map))
+            if (!queryset.check_all_conditions(baseset.attribute + j * baseset.attribute_num, queryset.filtering_conditions[i], baseset.attribute_map))
             {
                 continue;
             }
@@ -97,8 +77,6 @@ int main(int argc, char *argv[])
         std::sort(gt_dist.begin(), gt_dist.end(), distance_compare);
 
         temp_distance[i] = (gt_dist[k - 1].second - gt_dist[0].second) / (k - 1);
-        // for (int m = 1; m <= 20; m++)
-        //     temp_distance_x[m-1][i] = gt_dist[m * 10 - 1].second;
 
         std::vector<int> groundtruth;
         for (int j = 0; j < k; j++)
@@ -119,16 +97,7 @@ int main(int argc, char *argv[])
     float avg_distance = total_distance / queryset.num;
     std::cout << "Average nearest distance: " << avg_distance << std::endl;
 
-    // for (int i = 0; i < 20; i++) {
-    //     float sum = 0.0;
-    //     for (int j = 0; j < 1000; j++) {
-    //         sum += temp_distance_x[i][j];
-    //     }
-    //     float avg = sum / 1000.0;
-    //     printf("Row %d average: %f\n", (i+1)*10, avg);
-    // }
-
-    std::cout << "begin writting to " << groundtruth_path << std::endl;
+    std::cout << "begin writing to " << groundtruth_path << std::endl;
     std::ofstream writer(groundtruth_path, std::ios::binary);
     for (int i = 0; i < queryset.num; i++)
         for (int j = 0; j < k; j++)

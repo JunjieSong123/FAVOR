@@ -55,10 +55,10 @@ float interval(timeval &begin, timeval &end)
 int main(int argc, char *argv[])
 {
 
-    if (argc < 7)
+    if (argc < 8)
     {
-        std::cerr << "Usage: " << argv[0] << " baseset_path" << " queryset_path" << " attribute_path" << "topk" << " groundtruth_path" << " expression" << " index_path" << " ef\n"
-                  << "expression example: " << " \"age > 25 AND label IN [1,3,4]\"\n";
+        std::cerr << "Usage: " << argv[0] << " baseset_path" << " queryset_path" << " attribute_path" << "topk" << " groundtruth_path" << " condition_path" << " index_path" << " ef\n"
+                  << "condition_path: path to file containing filtering conditions for each query\n";
         return 1;
     }
 
@@ -78,26 +78,9 @@ int main(int argc, char *argv[])
     queryset.read_data(queryset_path);
     baseset.get_attribute(attribute_path);
 
-    std::string expr = argv[6];
-    try
-    {
-        Tokenizer tokenizer(expr);
-        std::vector<Token> tokens = tokenizer.tokenize();
+    std::string condition_path = argv[6];
+    queryset.load_filtering_conditions(condition_path);
 
-        Parser parser(tokens);
-        std::unique_ptr<Condition> ast = parser.parse();
-
-        std::cout << "Filtering Conditions:\n";
-        ast->print();
-        ast->trans(queryset.filtering_conditions);
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "Error: " << e.what() << std::endl;
-        return 1;
-    }
-
-    // load index
     std::string index_path = argv[7];
     int dim = baseset.dim;
     int num = baseset.num;
@@ -108,17 +91,14 @@ int main(int argc, char *argv[])
     hnswlib::L2Space space(dim);
     favor::FAVOR<float> *alg_hnsw = new favor::FAVOR<float>(&space, index_path, false, num, ef);
 
-    std::vector<FilterConditionWithId> conditions_with_id = ConditionTrans(queryset.filtering_conditions, baseset.attribute_map);
-
-    // vector search
     timeval begin, end;
     gettimeofday(&begin, NULL);
 
     float correct = 0;
 
     for (int i = 0; i < queryset.num; i++)
-    // for (int i = 0; i < 100; i++)
     {
+            std::vector<FilterConditionWithId> conditions_with_id = ConditionTrans(queryset.filtering_conditions[i], baseset.attribute_map);
             std::priority_queue<std::pair<float, hnswlib::labeltype>> result = alg_hnsw->searchKnn(queryset.vectors.at(i).data(), k, conditions_with_id);
             for (int j = 0; j < k; j++)
             {
@@ -129,7 +109,6 @@ int main(int argc, char *argv[])
             }
     }
 
-    // delete alg_brute_force;
     gettimeofday(&end, NULL);
 
     float total = interval(begin, end);

@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
     // random generator
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> intDist(0, 7);
+    std::uniform_int_distribution<> intDist(0, 99);
 
     outFile << baseset.num << "\n" << 1 << "\n";
 
