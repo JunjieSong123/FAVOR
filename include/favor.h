@@ -3,6 +3,11 @@
 #include <cstring>
 #include <cstdint>
 #include <cmath>
+#include <chrono>
+#include <iostream>
+#include <unordered_map>
+#include <list>
+#include <mutex>
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
     #ifdef USE_SSE
@@ -18,7 +23,6 @@
 using namespace hnswlib;
 namespace favor
 {
-    typedef float attributetype;
 
     template <typename dist_t>
     class FAVOR : public HierarchicalNSW<dist_t>
@@ -32,6 +36,47 @@ namespace favor
         std::mutex delta_mutex;
         dist_t delta_d = 0.0;
         const dist_t LARGE_DIST = 100000.0;
+
+    private:
+        struct CandidateCache {
+            std::string cache_key;
+            std::vector<size_t> candidates;
+        };
+        
+        mutable std::mutex cache_mutex_;
+        mutable std::list<CandidateCache> cache_list_;
+        mutable std::unordered_map<std::string, typename std::list<CandidateCache>::iterator> cache_map_;
+        static constexpr size_t MAX_CACHE_SIZE = 500;
+        
+        bool getCachedCandidates(const std::string& cache_key, std::vector<size_t>& candidates) const {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            auto it = cache_map_.find(cache_key);
+            if (it != cache_map_.end()) {
+                candidates = it->second->candidates;
+                cache_list_.splice(cache_list_.begin(), cache_list_, it->second);
+                return true;
+            }
+            return false;
+        }
+        
+        void cacheCandidates(const std::string& cache_key, const std::vector<size_t>& candidates) const {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            if (cache_map_.find(cache_key) != cache_map_.end()) {
+                return;
+            }
+            
+            if (cache_list_.size() >= MAX_CACHE_SIZE) {
+                auto last = cache_list_.end();
+                --last;
+                cache_map_.erase(last->cache_key);
+                cache_list_.pop_back();
+            }
+            
+            cache_list_.push_front({cache_key, candidates});
+            cache_map_[cache_key] = cache_list_.begin();
+        }
+
+    public:
 
         FAVOR(
             SpaceInterface<dist_t> *s,
@@ -964,21 +1009,51 @@ namespace favor
         searchBruteForce(const void *query_data, size_t k, const OptimizedFilter& conditions) const
         {
             std::priority_queue<std::pair<dist_t, labeltype>> result;
+        
+            bool cache_hit = false;
             
-            for (size_t i = 0; i < this->max_elements_; i++)
-            {
-                if (conditions.check(getAttributeByInternalId(i)))
+            std::vector<size_t> candidates;
+            candidates.reserve(this->max_elements_ / 10);
+            
+            std::string cache_key = conditions.getCacheKey();
+            
+            if (getCachedCandidates(cache_key, candidates)) {
+                cache_hit = true;
+            } else {
+#ifdef USE_AVX2
+                conditions.checkBatchAVX2(
+                    this->data_level0_memory_,
+                    this->size_data_per_element_,
+                    this->attribute_offset_,
+                    0,
+                    this->max_elements_,
+                    candidates
+                );
+#else
+                for (size_t i = 0; i < this->max_elements_; i++)
                 {
-                    dist_t d = this->fstdistfunc_(query_data, this->getDataByInternalId(i), this->dist_func_param_);
-                    if (result.size() < k)
-                        result.push(std::pair<dist_t, labeltype>(d, this->getExternalLabel(i)));
-                    else if (d < result.top().first)
+                    if (conditions.check(getAttributeByInternalId(i)))  [[unlikely]]
                     {
-                        result.push(std::pair<dist_t, labeltype>(d, this->getExternalLabel(i)));
-                        result.pop();
+                        candidates.push_back(i);
                     }
                 }
+#endif
+                cacheCandidates(cache_key, candidates);
             }
+            
+            for (size_t idx : candidates)
+            {
+                dist_t d = this->fstdistfunc_(query_data, this->getDataByInternalId(idx), this->dist_func_param_);
+                
+                if (result.size() < k)
+                    result.push(std::pair<dist_t, labeltype>(d, this->getExternalLabel(idx)));
+                else if (d < result.top().first)
+                {
+                    result.push(std::pair<dist_t, labeltype>(d, this->getExternalLabel(idx)));
+                    result.pop();
+                }
+            }
+            
             while (result.size() < k)
                 result.push(std::pair<dist_t, labeltype>(1000000.0f, -1));
             return result;
