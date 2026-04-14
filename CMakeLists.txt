@@ -10,7 +10,7 @@ endif()
 
 MESSAGE(STATUS ${CMAKE_CXX_FLAGS})
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 message(${CMAKE_SYSTEM})
 
@@ -32,9 +32,9 @@ include_directories(${PROJECT_SOURCE_DIR}/src)
 
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O3 ")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -mtune=native -mavx2 -mfma -ffast-math -funroll-loops -ftree-vectorize -fvect-cost-model=dynamic")
 
-option(NOSIMD "build hnsw on SIMD" ON)
+option(NOSIMD "SIMD" ON)
 IF(NOSIMD)
     add_definitions(-DNO_MANUAL_VECTORIZATION)
     add_definitions(-DKGRAPH_NO_VECTORIZE)
