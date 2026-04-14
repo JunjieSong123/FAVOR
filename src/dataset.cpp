@@ -2,8 +2,6 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
-#include <ctime>
-#include <random>
 
 #include "dataset.h"
 

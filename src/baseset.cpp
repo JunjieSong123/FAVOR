@@ -2,8 +2,6 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
-#include <ctime>
-#include <random>
 #include <sstream>
 #include <algorithm>
 
@@ -17,10 +15,9 @@ void BaseSet::get_attribute(const std::string &attribute_path)
     }
 
     attribute_map.clear();
-    attribute = nullptr;
-
     if (attribute != nullptr) {
         delete[] attribute;
+        attribute = nullptr;
     }
 
     std::string line;

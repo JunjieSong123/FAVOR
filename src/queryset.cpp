@@ -2,10 +2,9 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
-#include <ctime>
-#include <random>
 
 #include "dataset.h"
+#include "transform.h"
 
 bool QuerySet::check_condition(float *attribute, const FilterCondition& condition, std::map<std::string, int> attribute_map) const
 {
@@ -30,7 +29,7 @@ bool QuerySet::check_condition(float *attribute, const FilterCondition& conditio
     return false;
 }
 
-bool QuerySet::check_all_conditions(float* attribute, std::vector<FilterCondition>& conditions, std::map<std::string, int> attribute_map) const
+bool QuerySet::check_all_conditions(float* attribute, const std::vector<FilterCondition>& conditions, std::map<std::string, int> attribute_map) const
 {
     for (const auto& cond : conditions) {
         if (!check_condition(attribute, cond, attribute_map)) {
@@ -38,4 +37,37 @@ bool QuerySet::check_all_conditions(float* attribute, std::vector<FilterConditio
         }
     }
     return true;
+}
+
+void QuerySet::load_filtering_conditions(const std::string& condition_path)
+{
+    std::ifstream reader(condition_path);
+    if (!reader) {
+        throw std::runtime_error("Cannot open condition file: " + condition_path);
+    }
+
+    filtering_conditions.clear();
+    filtering_conditions.resize(num);
+
+    std::string line;
+    int query_id = 0;
+    
+    while (std::getline(reader, line) && query_id < num) {
+        if (line.empty()) continue;
+        
+        try {
+            Tokenizer tokenizer(line);
+            std::vector<Token> tokens = tokenizer.tokenize();
+            Parser parser(tokens);
+            std::unique_ptr<Condition> ast = parser.parse();
+            ast->trans(filtering_conditions[query_id]);
+            query_id++;
+        } catch (const std::exception& e) {
+            std::cerr << "Error parsing condition for query " << query_id << ": " << e.what() << std::endl;
+            throw;
+        }
+    }
+
+    reader.close();
+    std::cout << "Loaded filtering conditions for " << query_id << " queries" << std::endl;
 }
